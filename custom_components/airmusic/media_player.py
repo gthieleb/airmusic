@@ -67,7 +67,7 @@ VERSION = '1.7'
 DEFAULT_PORT = 8080
 DEFAULT_NAME = "Airmusic Radio"
 DEFAULT_TIMEOUT = 50
-DEFAULT_USERNAME = 'roosu3g4go6sk7'
+DEFAULT_USERNAME = 'su3g4go6sk7'
 DEFAULT_PASSWORD = 'ji39454xu/^'
 DEFAULT_SOURCE = ''
 DEFAULT_IMAGE = 'logo'
@@ -191,41 +191,76 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
     # Load favorite radio stations and input sources
     async def load_sources(self):
         """Initialize the Airmusic device loading the sources."""
-        # Load radio presets
-        list_xml = await self.request_call('/list?id=75&start=1&count=20')
-        soup = BeautifulSoup(list_xml, features="xml")
-    
-        src_names = [src_name.string for src_name in soup.find_all('name')]
-        sources = [src_reference.string for src_reference in soup.find_all('id')]
-        
-        # Filter out empty radio station slots ("Leer" = Empty in German)
         filtered_names = []
         filtered_sources = []
-        for name, source_id in zip(src_names, sources):
-            if name and name != 'Leer' and name.strip():
-                filtered_names.append(name)
-                filtered_sources.append(source_id)
         
-        # Load main menu sources (including Bluetooth, AUX, FM, etc.)
-        main_menu_xml = await self.request_call('/list?id=1&start=1&count=20')
-        main_soup = BeautifulSoup(main_menu_xml, features="xml")
+        try:
+            # Load radio presets
+            _LOGGER.debug("Airmusic: [load_sources] - Loading radio presets from /list?id=75")
+            list_xml = await self.request_call('/list?id=75&start=1&count=20')
+            if list_xml:
+                soup = BeautifulSoup(list_xml, features="xml")
+                src_names = [src_name.string for src_name in soup.find_all('name')]
+                sources = [src_reference.string for src_reference in soup.find_all('id')]
+                
+                # Filter out empty radio station slots ("Leer" = Empty in German)
+                for name, source_id in zip(src_names, sources):
+                    if name and name != 'Leer' and name.strip():
+                        filtered_names.append(name)
+                        filtered_sources.append(source_id)
+                        _LOGGER.debug("Airmusic: [load_sources] - Added radio station: %s (id: %s)", name, source_id)
+            else:
+                _LOGGER.warning("Airmusic: [load_sources] - Failed to load radio presets")
+        except Exception as e:
+            _LOGGER.error("Airmusic: [load_sources] - Error loading radio presets: %s", str(e))
         
-        main_src_names = [src_name.string for src_name in main_soup.find_all('name')]
-        main_sources = [src_reference.string for src_reference in main_soup.find_all('id')]
-        
-        # Add input sources we want to expose (using German names from device)
-        input_sources = ['Bluetooth', 'AUX', 'FM', 'DAB (IR)']
-        for name, source_id in zip(main_src_names, main_sources):
-            if name in input_sources:
-                filtered_names.append(name)
-                filtered_sources.append(source_id)
+        try:
+            # Load main menu sources (including Bluetooth, AUX, FM, etc.)
+            # Try both /list?id=1 and /list/ endpoints as fallback
+            _LOGGER.debug("Airmusic: [load_sources] - Loading main menu from /list?id=1")
+            main_menu_xml = await self.request_call('/list?id=1&start=1&count=20')
+            
+            if not main_menu_xml:
+                _LOGGER.debug("Airmusic: [load_sources] - Trying fallback /list/ endpoint")
+                main_menu_xml = await self.request_call('/list/')
+                
+            if main_menu_xml:
+                main_soup = BeautifulSoup(main_menu_xml, features="xml")
+                main_src_names = [src_name.string for src_name in main_soup.find_all('name')]
+                main_sources = [src_reference.string for src_reference in main_soup.find_all('id')]
+                
+                _LOGGER.debug("Airmusic: [load_sources] - Found main menu sources: %s", main_src_names)
+                
+                # Add input sources we want to expose (check both German and English names)
+                input_sources = ['Bluetooth', 'AUX', 'FM', 'DAB (IR)', 'DAB']
+                
+                for name, source_id in zip(main_src_names, main_sources):
+                    if name and name in input_sources:
+                        filtered_names.append(name)
+                        filtered_sources.append(source_id)
+                        _LOGGER.info("Airmusic: [load_sources] - Added input source: %s (id: %s)", name, source_id)
+                
+                # If Bluetooth wasn't found, try to find it with different names
+                if 'Bluetooth' not in filtered_names:
+                    bluetooth_alternatives = ['BT', 'Bluetooth', 'bluetooth']
+                    for name, source_id in zip(main_src_names, main_sources):
+                        if name and any(alt.lower() in name.lower() for alt in bluetooth_alternatives):
+                            filtered_names.append('Bluetooth')  # Normalize to 'Bluetooth'
+                            filtered_sources.append(source_id)
+                            _LOGGER.info("Airmusic: [load_sources] - Found Bluetooth as '%s' (id: %s)", name, source_id)
+                            break
+            else:
+                _LOGGER.warning("Airmusic: [load_sources] - Failed to load main menu sources")
+                
+        except Exception as e:
+            _LOGGER.error("Airmusic: [load_sources] - Error loading main menu sources: %s", str(e))
     
         self._source_names = filtered_names
         self._sources = dict(zip(filtered_names, filtered_sources))
         self._is_local_playback = False
         
-        _LOGGER.debug("Airmusic: [load_sources] - Loaded %d sources: %s",
-                     len(self._source_names), self._source_names)
+        _LOGGER.info("Airmusic: [load_sources] - Loaded %d sources: %s", len(self._source_names), self._source_names)
+        _LOGGER.debug("Airmusic: [load_sources] - Source mapping: %s", self._sources)
 
     async def get_sources_reference(self):
         """Import BeautifulSoup."""
@@ -240,7 +275,7 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
         _LOGGER.debug("Airmusic: [request_call] - Call request %s ", uri)
         async with self._request_semaphore:
             try:
-                async with self._opener.get(uri, auth=aiohttp.BasicAuth('su3g4go6sk7', 'ji39454xu/^', encoding='utf-8')) as resp:
+                async with self._opener.get(uri, auth=aiohttp.BasicAuth(DEFAULT_USERNAME, DEFAULT_PASSWORD, encoding='utf-8')) as resp:
                     text = await resp.text()
                 await asyncio.sleep(1)  # 1 second delay between requests
                 return text
@@ -503,7 +538,7 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
         try:
             async with aiohttp.ClientSession() as session:
                 _LOGGER.debug("Airmusic: [async_get_media_image] - Attempting to fetch image from: %s", url)
-                async with session.get(url, auth=aiohttp.BasicAuth('su3g4go6sk7', 'ji39454xu/^')) as response:
+                async with session.get(url, auth=aiohttp.BasicAuth(DEFAULT_USERNAME, DEFAULT_PASSWORD)) as response:
                     if response.status == 200:
                         content = await response.read()
                         _LOGGER.debug("Airmusic: [async_get_media_image] - Successfully fetched image")
@@ -544,23 +579,52 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
 # SET - Change source - From dropbox menu
     async def async_select_source(self, source):
         """Select input source."""
-        _LOGGER.debug("Airmusic: [async_select_source] - Change source to: %s", source)
+        _LOGGER.info("Airmusic: [async_select_source] - Attempting to change source to: %s", source)
+        
+        # Check if source is available
+        if source not in self._sources:
+            _LOGGER.error("Airmusic: [async_select_source] - Source '%s' not found in available sources: %s", source, list(self._sources.keys()))
+            return
+            
+        source_id = self._sources[source]
+        _LOGGER.debug("Airmusic: [async_select_source] - Source ID for '%s': %s", source, source_id)
         
         # Special handling for input sources (Bluetooth, AUX, FM, DAB)
-        input_sources = ['Bluetooth', 'AUX', 'FM', 'DAB (IR)']
-        if source in input_sources:
-            # Use Sendkey command for input sources
-            await self.request_call('/Sendkey?key=' + self._sources[source])
-            _LOGGER.debug("Airmusic: [async_select_source] - Activated input source %s with key %s", source, self._sources[source])
-            # For input sources, manually set the selected source since playinfo may return FAIL
-            self._selected_source = source
-        else:
-            # Use play_stn command for radio stations
-            await self.request_call('/play_stn?id=' + self._sources[source])
-            _LOGGER.debug("Airmusic: [async_select_source] - Playing radio station %s with id %s", source, self._sources[source])
+        input_sources = ['Bluetooth', 'AUX', 'FM', 'DAB (IR)', 'DAB']
+        
+        try:
+            if source in input_sources:
+                # Use Sendkey command for input sources
+                command = f'/Sendkey?key={source_id}'
+                _LOGGER.info("Airmusic: [async_select_source] - Sending input source command: %s", command)
+                result = await self.request_call(command)
+                
+                # Check if result contains OK response for input sources
+                if result and ('<rt>OK</rt>' in result or 'OK' in result):
+                    _LOGGER.info("Airmusic: [async_select_source] - Successfully activated input source %s with key %s", source, source_id)
+                    # For input sources, manually set the selected source since playinfo may return FAIL
+                    self._selected_source = source
+                    self._source_name = source
+                else:
+                    _LOGGER.error("Airmusic: [async_select_source] - Failed to activate input source %s, result: %s", source, result)
+                    return
+            else:
+                # Use play_stn command for radio stations
+                command = f'/play_stn?id={source_id}'
+                _LOGGER.info("Airmusic: [async_select_source] - Sending radio station command: %s", command)
+                result = await self.request_call(command)
+                
+                if result:
+                    _LOGGER.info("Airmusic: [async_select_source] - Successfully started playing radio station %s with id %s", source, source_id)
+                else:
+                    _LOGGER.error("Airmusic: [async_select_source] - Failed to play radio station %s", source)
+                    return
+                    
+            self._source_name = source
+            self._is_local_playback = False
             
-        self._source_name = source
-        self._is_local_playback = False
+        except Exception as e:
+            _LOGGER.error("Airmusic: [async_select_source] - Exception while changing source to %s: %s", source, str(e))
 
 # SET - Volume up
     async def async_volume_up(self):
