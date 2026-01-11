@@ -521,6 +521,12 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
         """Return the unique ID of the device."""
         return self._unique_id
 
+# GET - Should poll
+    @property
+    def should_poll(self):
+        """Return True as we need to poll to detect external state changes."""
+        return True
+
 # SET - Change source - From dropbox menu
     async def async_select_source(self, source):
         """Select input source."""
@@ -594,12 +600,16 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
     async def async_turn_on(self):
         """Turn the media player on."""
         await self.request_call('/Sendkey?key=7')
+        # Force update to reflect the state change immediately
+        await self.async_update_ha_state(force_refresh=True)
 
 # SET - Turn off
     async def async_turn_off(self):
         """Turn off media player."""
         await self.request_call('/Sendkey?key=7')
         self._reset_sleep_timer()
+        # Force update to reflect the state change immediately
+        await self.async_update_ha_state(force_refresh=True)
 
 # SET - Reset sleep timer
     def _reset_sleep_timer(self):
