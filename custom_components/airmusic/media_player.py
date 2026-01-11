@@ -188,14 +188,29 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
         if not self.upnp_device:
             _LOGGER.warning("No matching UPnP device found for %s", self._name)
       
-    # Load favorite radio stations
+    # Load favorite radio stations and input sources
     async def load_sources(self):
         """Initialize the Airmusic device loading the sources."""
+        # Load radio presets
         list_xml = await self.request_call('/list?id=75&start=1&count=20')
         soup = BeautifulSoup(list_xml, features="xml")
     
         src_names = [src_name.string for src_name in soup.find_all('name')]
         sources = [src_reference.string for src_reference in soup.find_all('id')]
+        
+        # Load main menu sources (including Bluetooth, AUX, FM, etc.)
+        main_menu_xml = await self.request_call('/list?id=1&start=1&count=20')
+        main_soup = BeautifulSoup(main_menu_xml, features="xml")
+        
+        main_src_names = [src_name.string for src_name in main_soup.find_all('name')]
+        main_sources = [src_reference.string for src_reference in main_soup.find_all('id')]
+        
+        # Filter to only include input sources we want to expose
+        input_sources = ['Bluetooth', 'AUX', 'FM', 'DAB (IR)']
+        for name, source_id in zip(main_src_names, main_sources):
+            if name in input_sources:
+                src_names.append(name)
+                sources.append(source_id)
     
         self._source_names = src_names
         self._sources = dict(zip(src_names, sources))
@@ -509,10 +524,21 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
 # SET - Change source - From dropbox menu
     async def async_select_source(self, source):
         """Select input source."""
-        _LOGGER.debug("Airmusic: [async_select_source] - Change radio source")
-        await self.request_call('/play_stn?id=' + self._sources[source])
+        _LOGGER.debug("Airmusic: [async_select_source] - Change source to: %s", source)
+        
+        # Special handling for input sources (Bluetooth, AUX, FM, DAB)
+        input_sources = ['Bluetooth', 'AUX', 'FM', 'DAB (IR)']
+        if source in input_sources:
+            # Use Sendkey command for input sources
+            await self.request_call('/Sendkey?key=' + self._sources[source])
+            _LOGGER.debug("Airmusic: [async_select_source] - Activated input source %s with key %s", source, self._sources[source])
+        else:
+            # Use play_stn command for radio stations
+            await self.request_call('/play_stn?id=' + self._sources[source])
+            _LOGGER.debug("Airmusic: [async_select_source] - Playing radio station %s with id %s", source, self._sources[source])
+            
         self._source_name = source
-        self._is_local_playback = False 
+        self._is_local_playback = False
 
 # SET - Volume up
     async def async_volume_up(self):
