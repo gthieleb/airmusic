@@ -293,9 +293,20 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
     def _update_media_info(self, soup):
         """Update media information from playinfo response."""
         current_time = int(time.time())
-        self._selected_source = soup.station_info.renderContents().decode('UTF8') if soup.station_info else str(current_time)
-        eventid = soup.artist.renderContents().decode('UTF8') if soup.artist else None
-        eventtitle = soup.song.renderContents().decode('UTF8') if soup.song else None
+        
+        # Check if playinfo returns FAIL (common for input sources like Bluetooth, AUX)
+        result_content = soup.result.renderContents().decode('UTF8') if soup.result else ""
+        if result_content == "FAIL":
+            # When in input mode (Bluetooth, AUX, etc.), keep the manually set source
+            # and don't override with station_info
+            eventid = None
+            eventtitle = None
+            _LOGGER.debug("Airmusic: [_update_media_info] - Playinfo returned FAIL, likely in input mode")
+        else:
+            # Normal radio/streaming mode - update source from station_info
+            self._selected_source = soup.station_info.renderContents().decode('UTF8') if soup.station_info else str(current_time)
+            eventid = soup.artist.renderContents().decode('UTF8') if soup.artist else None
+            eventtitle = soup.song.renderContents().decode('UTF8') if soup.song else None
 
         # Calculate remaining sleep time
         sleep_timer_info = ""
@@ -308,10 +319,12 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
                 self._reset_sleep_timer()
                 asyncio.create_task(self.async_turn_off())
 
-        if self._selected_source != str(current_time):
+        # Build media title based on available info
+        if eventid or eventtitle:
             self._selected_media_title = ' - '.join(filter(None, [self._selected_source, eventid, eventtitle])) + sleep_timer_info
         else:
-            self._selected_media_title = ' - '.join(filter(None, [eventid, eventtitle])) + sleep_timer_info
+            # For input sources without track info, just show the source name
+            self._selected_media_title = self._selected_source + sleep_timer_info
 
         self._selected_media_content_id = eventid
 
@@ -321,7 +334,7 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
             self._sleep_timer_end_time = None
     
         # Update image URL
-        imagelogo = soup.result.renderContents().decode('UTF8')
+        imagelogo = soup.result.renderContents().decode('UTF8') if soup.result else ""
         if imagelogo.find('<album_img>') >= 0:
             self._image_url = f'http://{self._host}:8080/album.jpg'
         elif imagelogo.find('<logo_img>') >= 0:
@@ -538,6 +551,8 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
             # Use Sendkey command for input sources
             await self.request_call('/Sendkey?key=' + self._sources[source])
             _LOGGER.debug("Airmusic: [async_select_source] - Activated input source %s with key %s", source, self._sources[source])
+            # For input sources, manually set the selected source since playinfo may return FAIL
+            self._selected_source = source
         else:
             # Use play_stn command for radio stations
             await self.request_call('/play_stn?id=' + self._sources[source])
