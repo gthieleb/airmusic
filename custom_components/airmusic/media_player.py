@@ -215,7 +215,11 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
         async with self._request_semaphore:
             try:
                 async with self._opener.get(uri, auth=aiohttp.BasicAuth('su3g4go6sk7', 'ji39454xu/^', encoding='utf-8')) as resp:
-                    text = await resp.text()
+                    try:
+                        text = await resp.text(encoding='utf-8', errors='replace')
+                    except UnicodeDecodeError as decode_error:
+                        _LOGGER.warning("Unicode decode error for %s: %s. Attempting fallback encoding.", uri, str(decode_error))
+                        text = await resp.text(encoding='latin-1', errors='replace')
                 await asyncio.sleep(1)  # 1 second delay between requests
                 return text
             except aiohttp.ClientConnectorError as e:

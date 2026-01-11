@@ -66,7 +66,7 @@ class AirMusicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class AirMusicOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry):
-        self.config_entry = config_entry
+        self._config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
         return await self.async_step_user()
@@ -98,7 +98,7 @@ class AirMusicOptionsFlow(config_entries.OptionsFlow):
                                     )
                         # Proceed with updating the configuration
                         self.hass.config_entries.async_update_entry(
-                            self.config_entry, data={CONF_HOST: host, CONF_NAME: name}
+                            self._config_entry, data={CONF_HOST: host, CONF_NAME: name}
                         )
                         return self.async_create_entry(title="", data={})
                     else:
@@ -111,8 +111,8 @@ class AirMusicOptionsFlow(config_entries.OptionsFlow):
                 errors["base"] = "unknown"
 
         self.data_schema = vol.Schema({
-            vol.Required(CONF_HOST, default=self.config_entry.data.get(CONF_HOST)): str,
-            vol.Optional(CONF_NAME, default=self.config_entry.data.get(CONF_NAME, DEFAULT_NAME)): str
+            vol.Required(CONF_HOST, default=self._config_entry.data.get(CONF_HOST)): str,
+            vol.Optional(CONF_NAME, default=self._config_entry.data.get(CONF_NAME, DEFAULT_NAME)): str
         })
 
         return self.async_show_form(
