@@ -58,7 +58,10 @@ from homeassistant.const import (
 
 import homeassistant.helpers.config_validation as cv
 from homeassistant.util import Throttle
-from .const import DOMAIN, CONF_HOST, CONF_NAME
+from .const import (
+    DOMAIN, CONF_HOST, CONF_NAME, CONF_LOCALE, CONF_EMPTY_SLOT_TEXT, CONF_INPUT_SOURCES,
+    DEFAULT_LOCALE, DEFAULT_EMPTY_SLOT_TEXT, DEFAULT_INPUT_SOURCES, LOCALIZED_STRINGS
+)
 
 # VERSION
 VERSION = '1.7'
@@ -116,8 +119,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     host = entry.data[CONF_HOST]
     name = entry.data[CONF_NAME]
+    
+    # Get internationalization settings with backward compatibility
+    locale = entry.data.get(CONF_LOCALE, DEFAULT_LOCALE)
+    empty_slot_text = entry.data.get(CONF_EMPTY_SLOT_TEXT, LOCALIZED_STRINGS.get(locale, {}).get("empty_slot", DEFAULT_EMPTY_SLOT_TEXT))
+    input_sources = entry.data.get(CONF_INPUT_SOURCES, LOCALIZED_STRINGS.get(locale, {}).get("input_sources", DEFAULT_INPUT_SOURCES))
 
-    airmusic = AirmusicMediaPlayer(hass, host, name)
+    airmusic = AirmusicMediaPlayer(hass, host, name, locale, empty_slot_text, input_sources)
 
     async_add_entities([airmusic], update_before_add=True)
 
@@ -132,7 +140,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class AirmusicMediaPlayer(MediaPlayerEntity):
     """Representation of a Airmusic Media Player device."""
 
-    def __init__(self, hass, host, name):
+    def __init__(self, hass, host, name, locale=DEFAULT_LOCALE, empty_slot_text=None, input_sources=None):
         """Initialize the Airmusic device."""
         super().__init__()
         self.hass = hass
@@ -155,6 +163,11 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
         self._image_url = {}
         self._source_name = None
         self._source_names = {}
+        
+        # Internationalization settings
+        self._locale = locale
+        self._empty_slot_text = empty_slot_text or LOCALIZED_STRINGS.get(locale, {}).get("empty_slot", DEFAULT_EMPTY_SLOT_TEXT)
+        self._input_sources = input_sources or LOCALIZED_STRINGS.get(locale, {}).get("input_sources", DEFAULT_INPUT_SOURCES)
         self._sources = {}
         self._unique_id = f"{self._host}-{self._name}"
         self._request_semaphore = asyncio.Semaphore(1)
@@ -198,11 +211,11 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
         src_names = [src_name.string for src_name in soup.find_all('name')]
         sources = [src_reference.string for src_reference in soup.find_all('id')]
         
-        # Filter out empty radio station slots ("Leer" = Empty in German)
+        # Filter out empty radio station slots (configurable empty slot text)
         filtered_names = []
         filtered_sources = []
         for name, source_id in zip(src_names, sources):
-            if name and name != 'Leer' and name.strip():
+            if name and name != self._empty_slot_text and name.strip():
                 filtered_names.append(name)
                 filtered_sources.append(source_id)
         
@@ -213,10 +226,9 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
         main_src_names = [src_name.string for src_name in main_soup.find_all('name')]
         main_sources = [src_reference.string for src_reference in main_soup.find_all('id')]
         
-        # Add input sources we want to expose (using German names from device)
-        input_sources = ['Bluetooth', 'AUX', 'FM', 'DAB (IR)']
+        # Add input sources we want to expose (configurable input sources)
         for name, source_id in zip(main_src_names, main_sources):
-            if name in input_sources:
+            if name in self._input_sources:
                 filtered_names.append(name)
                 filtered_sources.append(source_id)
     
@@ -546,9 +558,8 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
         """Select input source."""
         _LOGGER.debug("Airmusic: [async_select_source] - Change source to: %s", source)
         
-        # Special handling for input sources (Bluetooth, AUX, FM, DAB)
-        input_sources = ['Bluetooth', 'AUX', 'FM', 'DAB (IR)']
-        if source in input_sources:
+        # Special handling for input sources (configurable input sources)
+        if source in self._input_sources:
             # Use Sendkey command for input sources
             await self.request_call('/Sendkey?key=' + self._sources[source])
             _LOGGER.debug("Airmusic: [async_select_source] - Activated input source %s with key %s", source, self._sources[source])
