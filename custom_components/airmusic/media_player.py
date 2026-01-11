@@ -198,6 +198,14 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
         src_names = [src_name.string for src_name in soup.find_all('name')]
         sources = [src_reference.string for src_reference in soup.find_all('id')]
         
+        # Filter out empty radio station slots ("Leer" = Empty in German)
+        filtered_names = []
+        filtered_sources = []
+        for name, source_id in zip(src_names, sources):
+            if name and name != 'Leer' and name.strip():
+                filtered_names.append(name)
+                filtered_sources.append(source_id)
+        
         # Load main menu sources (including Bluetooth, AUX, FM, etc.)
         main_menu_xml = await self.request_call('/list?id=1&start=1&count=20')
         main_soup = BeautifulSoup(main_menu_xml, features="xml")
@@ -205,16 +213,19 @@ class AirmusicMediaPlayer(MediaPlayerEntity):
         main_src_names = [src_name.string for src_name in main_soup.find_all('name')]
         main_sources = [src_reference.string for src_reference in main_soup.find_all('id')]
         
-        # Filter to only include input sources we want to expose
+        # Add input sources we want to expose (using German names from device)
         input_sources = ['Bluetooth', 'AUX', 'FM', 'DAB (IR)']
         for name, source_id in zip(main_src_names, main_sources):
             if name in input_sources:
-                src_names.append(name)
-                sources.append(source_id)
+                filtered_names.append(name)
+                filtered_sources.append(source_id)
     
-        self._source_names = src_names
-        self._sources = dict(zip(src_names, sources))
+        self._source_names = filtered_names
+        self._sources = dict(zip(filtered_names, filtered_sources))
         self._is_local_playback = False
+        
+        _LOGGER.debug("Airmusic: [load_sources] - Loaded %d sources: %s",
+                     len(self._source_names), self._source_names)
 
     async def get_sources_reference(self):
         """Import BeautifulSoup."""
